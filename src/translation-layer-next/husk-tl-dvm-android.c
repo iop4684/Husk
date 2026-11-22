@@ -528,6 +528,7 @@ dvm_native_fn tl_sqlite_native(const char *name, const char *sig);
 dvm_native_fn tl_media_native(const char *name, const char *sig);
 dvm_native_fn tl_web_native(const char *name, const char *sig);
 bool tl_web_any_visible(void);
+int tl_web_visible_rects(int *out, int max);
 dvm_native_fn dvm_android_native(const char *cls, const char *name, const char *sig)
 {
     if (!strcmp(cls, "husk/Sqlite")) return tl_sqlite_native(name, sig);
@@ -936,6 +937,10 @@ static void *gl_main(void *arg)
     uint64_t app_seq = 0;
     void (*clearColor)(float, float, float, float) = gl_fn("glClearColor");
     void (*clear)(uint32_t) = gl_fn("glClear");
+    void (*scissor)(int, int, int, int) = gl_fn("glScissor");
+    void (*glEnableP)(uint32_t) = gl_fn("glEnable");
+    void (*glDisableP)(uint32_t) = gl_fn("glDisable");
+    bool said_holes = false;
     tl_log_line("javaapp: render thread ready (ES %d available), %dx%d", es3 ? 3 : 2, A.cfg.width, A.cfg.height);
 
     jobj *gl10 = NULL;
@@ -1009,6 +1014,22 @@ static void *gl_main(void *arg)
             makeCurrent(dpy, surf, surf, ui);
             if (!app) { clearColor(0, 0, 0, tl_web_any_visible() && !app_frame_on() ? 0 : 1); clear(0x4000); }     /* web views show through from under the screen */
             if (!app) app_frame_draw(&appov, &appup, A.cfg.width, A.cfg.height);
+            /* a page shown over a game that draws its own surface (Unity's consent and age-gate dialogs): the game's picture is
+             * opaque and would hide the page under the screen, so it is cleared where a page is visible */
+            if (!app && app_frame_on() && tl_web_any_visible() && scissor && glEnableP && glDisableP) {
+                int r[4 * 16], n = tl_web_visible_rects(r, 16);
+                if (n > 0) {
+                    glEnableP(0x0C11);                                  /* GL_SCISSOR_TEST */
+                    clearColor(0, 0, 0, 0);
+                    for (int i = 0; i < n; i++) {
+                        int x = r[4 * i], w = r[4 * i + 2], h = r[4 * i + 3], y = A.cfg.height - (r[4 * i + 1] + h);
+                        scissor(x, y, w, h);
+                        clear(0x4000);
+                    }
+                    glDisableP(0x0C11);
+                    if (!said_holes) { said_holes = true; tl_log_line("javaapp: %d web page(s) over the game's picture: cleared there so they show", n); }
+                }
+            }
             if (tl_ui_has_frame()) ov_draw(&ov, A.cfg.width, A.cfg.height);
             swapBuffers(dpy, surf);
             atomic_fetch_add(&A.frames, 1);

@@ -802,6 +802,23 @@ bool tl_web_hit(float x, float y)
 }
 
 bool tl_web_any_visible(void) { return atomic_load(&g_visible_webs) > 0; }
+/* The visible web views' rectangles in surface pixels (x, y from the top left, w, h), at most max of them: the compositor clears
+ * the game's own picture there so a page shows through from under the screen (a consent dialog over a Unity game). */
+int tl_web_visible_rects(int *out, int max)
+{
+    int n = 0;
+    pthread_mutex_lock(&g_hit_lock);
+    for (int i = 0; i < g_nhits && n < max; i++) {
+        if (!g_hits[i].visible || g_hits[i].w <= 0 || g_hits[i].h <= 0) continue;
+        out[4 * n + 0] = (int)(g_hits[i].x * g_scale);
+        out[4 * n + 1] = (int)(g_hits[i].y * g_scale);
+        out[4 * n + 2] = (int)(g_hits[i].w * g_scale + 0.5f);
+        out[4 * n + 3] = (int)(g_hits[i].h * g_scale + 0.5f);
+        n++;
+    }
+    pthread_mutex_unlock(&g_hit_lock);
+    return n;
+}
 
 #if !TARGET_OS_IPHONE
 /* The harness: a run loop on the main thread for WebKit, taps as clicks, and the web views' pixels for screenshots. */
