@@ -15,6 +15,7 @@ bool tl_ld_covers(const void *addr, size_t bytes);
 #include "husk-tl-internal.h"
 #include "husk-tl-codewrite.h"
 #include "husk-tl-xmem.h"
+#include "husk-tl-ld.h"
 #include "husk-tl-binder.h"
 
 #include <ctype.h>
@@ -1445,6 +1446,25 @@ static void *b_mmap(void *addr, size_t len, int prot, int flags, int fd, long of
             tl_note_once("a JIT's code memory (mmap hinted near the code) comes from the JIT region");
             mm_trace("mmap-jit", rx, len, prot, flags);
             return rx;
+        }
+    }
+    /* Dobby's trampoline pages: an inline-hook library linked into a mod (PvZ Heroes' libsprig) maps a page of its own with no
+     * execute permission, makes it r-x with mprotect, and patches it later with mprotect RWX + memcpy. On a phone only the JIT
+     * region can run code, so such a page made executable in place faults when it is run. A small anonymous mapping asked for
+     * by a library that carries Dobby comes from the JIT region instead: mprotect there is a yes and its stores go through the
+     * writable view (code-write emulation). */
+    if (!(prot & PROT_EXEC) && (flags & 0x20) && !(flags & 0x10) && len <= (64u << 10) && tl_codewrite_enabled()) {
+        tl_lib *caller = tl_ld_lib_of(__builtin_return_address(0));
+        if (caller && tl_ld_sym(caller, "DobbyHook")) {
+            uint8_t *rx, *rw;
+            size_t n = (len + TL_XMEM_PAGE - 1) & ~(size_t)(TL_XMEM_PAGE - 1);
+            if (tl_xmem_alloc(n, &rx, &rw)) {
+                memset(rw, 0, n);
+                static int said;
+                if (said++ < 4) tl_log_line("mm: %#zx bytes for %s's inline hooks (Dobby) from the JIT region at %p", n, tl_ld_lib_name(caller), (void *)rx);
+                mm_trace("mmap-dobby", rx, len, prot, flags);
+                return rx;
+            }
         }
     }
     int df = flags & 0x3;                                   /* MAP_SHARED / MAP_PRIVATE */
