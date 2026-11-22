@@ -11,5 +11,9 @@ void tl_codewrite_enable(void);
 bool tl_codewrite_enabled(void);
 /* Stores carried out so far, for the log. */
 long tl_codewrite_count(void);
+/* The guest's own memory (outside the JIT region) that mprotect made executable and, for W^X, not writable: an inline-hook
+ * library (Dobby) writes its trampolines there afterwards. Its pages then flip between writable and executable as they
+ * fault, instead of the store ending the game. */
+void tl_codewrite_note_exec(void *addr, unsigned long len);
 
 #endif

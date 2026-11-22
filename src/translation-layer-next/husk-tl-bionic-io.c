@@ -1565,7 +1565,7 @@ static int b_mprotect(void *a, size_t l, int prot)
             r = mprotect(a, l, prot & (PROT_READ | PROT_WRITE | PROT_EXEC));
             if (r != 0 && (prot & PROT_WRITE)) r = mprotect(a, l, (prot & ~PROT_WRITE) & (PROT_READ | PROT_EXEC));
             TL_ERRNO_END();
-            if (r == 0) { sys_icache_invalidate(a, l); tl_note_once("the guest made memory of its own executable (generated code)"); }
+            if (r == 0) { sys_icache_invalidate(a, l); tl_note_once("the guest made memory of its own executable (generated code)"); tl_codewrite_note_exec(a, l); }
         }
         if (r != 0) {
             tl_note_once("mprotect asked to make the guest's own memory executable: refused");

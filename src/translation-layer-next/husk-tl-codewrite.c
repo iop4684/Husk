@@ -24,7 +24,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <libkern/OSCacheControl.h>
+#include <sys/mman.h>
 #include <sys/ucontext.h>
+#include <unistd.h>
 
 #include "husk-tl-bionic.h"
 #include "husk-tl-ld.h"
@@ -36,6 +39,49 @@ static volatile long g_emulated;
 
 bool tl_codewrite_enabled(void) { return g_on; }
 long tl_codewrite_count(void) { return g_emulated; }
+
+/* Pages of the guest's own that were made r-x (tl_codewrite_note_exec). Appended under mprotect, read in the fault handler. */
+#define WX_MAX 512
+static struct { uintptr_t lo, hi; } g_wx[WX_MAX];
+static volatile long g_wx_n;
+static volatile long g_wx_flips;
+
+void tl_codewrite_note_exec(void *addr, unsigned long len)
+{
+    if (!g_on || !len) return;
+    uintptr_t pg = (uintptr_t)getpagesize();
+    uintptr_t lo = (uintptr_t)addr & ~(pg - 1), hi = ((uintptr_t)addr + len + pg - 1) & ~(pg - 1);
+    long n = g_wx_n;
+    for (long i = 0; i < n; i++) if (g_wx[i].lo <= lo && g_wx[i].hi >= hi) return;
+    if (n >= WX_MAX) return;
+    g_wx[n].lo = lo; g_wx[n].hi = hi;
+    __atomic_store_n(&g_wx_n, n + 1, __ATOMIC_RELEASE);
+    static int said;
+    if (said++ < 4) tl_log_line("codewrite: %#lx-%#lx made executable by the guest; it will flip writable when written", (unsigned long)lo, (unsigned long)hi);
+}
+
+static bool wx_tracked(uintptr_t a)
+{
+    long n = __atomic_load_n(&g_wx_n, __ATOMIC_ACQUIRE);
+    for (long i = 0; i < n; i++) if (a >= g_wx[i].lo && a < g_wx[i].hi) return true;
+    return false;
+}
+
+/* A fault on one of those pages: a store makes the page writable, running code there makes it executable again. The
+ * instruction is retried, not skipped. */
+static bool wx_flip(siginfo_t *info, const ucontext_t *u)
+{
+    if (!info) return false;
+    uintptr_t a = (uintptr_t)info->si_addr, pc = (uintptr_t)u->uc_mcontext->__ss.__pc;
+    if (!wx_tracked(a)) return false;
+    uintptr_t pg = (uintptr_t)getpagesize();
+    void *page = (void *)(a & ~(pg - 1));
+    int prot = a == pc ? (PROT_READ | PROT_EXEC) : (PROT_READ | PROT_WRITE);
+    if (mprotect(page, pg, prot) != 0) return false;
+    if (prot & PROT_EXEC) sys_icache_invalidate(page, pg);
+    g_wx_flips++;
+    return true;
+}
 
 static int64_t sext(uint64_t v, int bits) { return (int64_t)(v << (64 - bits)) >> (64 - bits); }
 
@@ -209,6 +255,7 @@ static void on_fault(int sig, siginfo_t *info, void *uc)
             return;
         }
     }
+    if (g_on && wx_flip(info, u)) return;
     chain(sig == SIGBUS ? &g_prev_bus : &g_prev_segv, sig, info, uc);
 }
 
