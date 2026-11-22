@@ -59,7 +59,12 @@ extension TLReport {
         if abis.isEmpty { return dexCount > 0 && webKind == nil ? .java : nil }
         // Unity 6 runs through its own Java activity (UnityPlayerForActivityOrService), on the Java runtime
         if engine == "Unity 6" { return .java }
-        if engine?.hasPrefix("Unity") == true { return .unity }
+        if engine?.hasPrefix("Unity") == true {
+            // EA's Nimble SDK (PvZ Heroes and other EA Unity games) signs in and downloads its content through its own Java
+            // code, which the native Unity driver only stubs: run these on the Java runtime, like Unity 6
+            if libraries.contains(where: { $0.name == "libNimble.so" }) { return .java }
+            return .unity
+        }
         // the cocos2d-x driver is Geometry Dash's (FMOD, RobTop's activity); other cocos2d-x games run their Java activity on the Java runtime
         if engine == "Cocos" { return libraries.contains(where: { $0.name == "libfmod.so" }) ? .cocos : .java }
         if engine == "Minecraft" { return .minecraft }

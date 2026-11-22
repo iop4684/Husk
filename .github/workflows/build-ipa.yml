@@ -1,0 +1,90 @@
+# Builds Husk.ipa on GitHub Actions and publishes it as a release of this fork.
+# Only the app (Xcode + the translation layer) is compiled; QEMU, ANGLE, MoltenVK, the PS4 layer and the Java runtime are
+# taken from the latest official Leviidev/Husk release IPA (scripts/fork/stage_prebuilt.sh, from Alvarocrack/Husk).
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'Screenshots/**', 'showcase/**', 'catalog/**', 'altsource.json', 'research/**', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-ipa
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          X=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1 || true)
+          [ -n "$X" ] || X=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Xcode: $X"
+          sudo xcode-select -s "$X/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Tools (xcodegen, qemu-img)
+        run: brew install xcodegen qemu
+
+      - name: Rust for iOS
+        run: |
+          rustup target add aarch64-apple-ios
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/rppairing-ios/target
+          key: rppairing-${{ runner.os }}-${{ hashFiles('src/rppairing-ios/Cargo.lock') }}
+
+      - name: Prebuilt pieces from the official IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fork/stage_prebuilt.sh
+
+      - name: Pairing (built-in StikJIT)
+        run: ./scripts/build_rppairing_ios.sh
+
+      - name: Build and package
+        run: |
+          mkdir -p build
+          ./scripts/package_ipa.sh "$PWD/build/Husk.ipa" || { tail -200 /tmp/husk_ipa/build.log; exit 1; }
+          ./scripts/package_ipa.sh --trollstore "$PWD/build/Husk.tipa"
+
+      - name: Build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/husk_ipa/build.log
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Husk-ipa
+          path: |
+            build/Husk.ipa
+            build/Husk.tipa
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          SHORT=$(git rev-parse --short HEAD)
+          gh release create "$TAG" build/Husk.ipa build/Husk.tipa \
+            --title "Husk + EA Nimble on the Java runtime #${GITHUB_RUN_NUMBER} (${SHORT})" \
+            --notes "Built from ${SHORT}. Unity games that bundle EA's Nimble SDK (PvZ Heroes) run on Husk's Java runtime. Husk.ipa for sideloading, Husk.tipa for TrollStore." \
+            --latest
