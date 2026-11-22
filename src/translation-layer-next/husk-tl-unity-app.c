@@ -542,7 +542,6 @@ bool husk_java_launch(const char *apk, const char *data_dir, void *metal_layer, 
 {
     return launch(ENGINE_JAVA, apk, data_dir, metal_layer, width, height, angle_dylib, ca_bundle);
 }
-void husk_java_set_refresh(int hz) { tl_javaapp_set_refresh(hz); }
 void husk_java_set_gc(int mode) { g_java_gc = mode < 0 ? 0 : mode > 2 ? 2 : mode; }
 
 void husk_java_set_runtime(const char *root, float density)
