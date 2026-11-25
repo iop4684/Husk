@@ -625,8 +625,29 @@ static EGLint w_eglClientWaitSync(EGLDisplay d, void *s, EGLint f, uint64_t t)
 }
 static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDestroySync(d, s) : EGL_FALSE; }
 
+/* Diagnostic: each texture upload of the game's (size, formats) and the GL error it leaves, for the first few hundred. */
+static unsigned (*r_glGetError_tex)(void);
+static atomic_int g_tex_logged;
+static void tex_note(const char *fn, unsigned t, int l, unsigned ifmt, int w, int h, unsigned fmt, unsigned type, const void *px)
+{
+    if (!r_glGetError_tex && a_eglGetProcAddress) r_glGetError_tex = (unsigned (*)(void))a_eglGetProcAddress("glGetError");
+    unsigned e = r_glGetError_tex ? r_glGetError_tex() : 0;
+    int k = atomic_fetch_add(&g_tex_logged, 1);
+    if (k < 400 || e) tl_log_line("gltex: %s target %#x level %d ifmt %#x %dx%d fmt %#x type %#x data %s -> error %#x", fn, t, l, ifmt, w, h, fmt, type, px ? "yes" : "none", e);
+}
+static void (*r_glTexImage2D)(unsigned, int, int, int, int, int, unsigned, unsigned, const void *);
+static void w_glTexImage2D(unsigned t, int l, int ifmt, int w, int h, int b, unsigned fmt, unsigned type, const void *px)
+{ r_glTexImage2D(t, l, ifmt, w, h, b, fmt, type, px); tex_note("glTexImage2D", t, l, (unsigned)ifmt, w, h, fmt, type, px); }
+static void (*r_glCompressedTexImage2D)(unsigned, int, unsigned, int, int, int, int, const void *);
+static void w_glCompressedTexImage2D(unsigned t, int l, unsigned ifmt, int w, int h, int b, int size, const void *px)
+{ r_glCompressedTexImage2D(t, l, ifmt, w, h, b, size, px); tex_note("glCompressedTexImage2D", t, l, ifmt, w, h, 0, (unsigned)size, px); }
+static void (*r_glTexStorage2D)(unsigned, int, unsigned, int, int);
+static void w_glTexStorage2D(unsigned t, int levels, unsigned ifmt, int w, int h)
+{ r_glTexStorage2D(t, levels, ifmt, w, h); tex_note("glTexStorage2D", t, levels, ifmt, w, h, 0, 0, NULL); }
+
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
+    ADAPT(glTexImage2D), ADAPT(glCompressedTexImage2D), ADAPT(glTexStorage2D),
     ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
     ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
