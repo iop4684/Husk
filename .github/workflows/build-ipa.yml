@@ -54,6 +54,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/fork/stage_prebuilt.sh
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Java framework from this source (husk-framework.dex), over the official one
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/r8.jar" https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.5.35/r8-8.5.35.jar
+          HUSK_JDK="$JAVA_HOME" HUSK_D8="$RUNNER_TEMP/r8.jar" ./src/java-framework/build.sh "$PWD/build/java-runtime/husk-framework.dex"
+          ls -la build/java-runtime/*.dex
+
       - name: Pairing (built-in StikJIT)
         run: ./scripts/build_rppairing_ios.sh
 

@@ -237,7 +237,15 @@ public final class ViewRoot implements ViewParent {
             b.append(" bg=").append(bg.getClass().getSimpleName());
             if (bg instanceof android.graphics.drawable.ColorDrawable) b.append('#').append(Integer.toHexString(((android.graphics.drawable.ColorDrawable) bg).getColor()));
             if (bg instanceof android.graphics.drawable.GradientDrawable && ((android.graphics.drawable.GradientDrawable) bg).getColor() != null) b.append(((android.graphics.drawable.GradientDrawable) bg).getColor());
-            b.append(" alpha=").append(bg.getAlpha());
+            b.append(" alpha=").append(bg.getAlpha()).append(" bounds=").append(bg.getBounds().toShortString()).append(" intrinsic=").append(bg.getIntrinsicWidth()).append('x').append(bg.getIntrinsicHeight());
+            android.graphics.drawable.Drawable cur = bg.getCurrent();
+            for (int k = 0; k < 4 && cur != null && cur != bg; k++) {   // a selector, layer or wrapper: what it actually draws
+                b.append(" -> ").append(cur.getClass().getSimpleName()).append(' ').append(cur.getBounds().toShortString()).append(" intrinsic=").append(cur.getIntrinsicWidth()).append('x').append(cur.getIntrinsicHeight());
+                android.graphics.drawable.Drawable nx = cur.getCurrent();
+                if (nx == cur && cur instanceof android.graphics.drawable.DrawableWrapper) nx = ((android.graphics.drawable.DrawableWrapper) cur).getDrawable();
+                if (nx == cur) break;
+                bg = cur; cur = nx;
+            }
             if (v.getBackgroundTintList() != null) b.append(" tint=").append(v.getBackgroundTintList());
         }
         android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
